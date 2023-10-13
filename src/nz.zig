@@ -22,7 +22,7 @@ pub fn Tensor(comptime T: type) type {
             names: Names = &.{},
         };
         pub fn tensor(allocator: Allocator, slice: []const T, options: TensorOpts) !Self {
-            if (slice.len != shapeSize(options.shape)) {
+            if (slice.len != util.shapeSize(options.shape)) {
                 return TensorError.InvalidShape;
             }
             if (options.names.len > 0 and options.names.len != options.shape.len) {
@@ -38,10 +38,10 @@ pub fn Tensor(comptime T: type) type {
 
         pub const IotaOpts = struct { axis: ?usize = null, names: Names = &.{} };
         pub fn iota(allocator: Allocator, shape: Shape, opts: IotaOpts) !Self {
-            const shape_size = shapeSize(shape);
+            const shape_size = util.shapeSize(shape);
             var slice = try allocator.alloc(T, shape_size);
             for (0..shape_size) |i| {
-                const shape_indexes = try idxToShapeIndexes(allocator, i, shape);
+                const shape_indexes = try util.idxToShapeIndexes(allocator, i, shape);
                 defer allocator.free(shape_indexes);
                 const val = if (opts.axis == null) i else shape_indexes[opts.axis.?];
                 defer slice[i] = switch (@typeInfo(T)) {
@@ -78,10 +78,10 @@ pub fn Tensor(comptime T: type) type {
         }
 
         pub fn tril(self: *const Self, opts: TriOpts) !Self {
-            const shape_size = shapeSize(self.shape);
+            const shape_size = util.shapeSize(self.shape);
             var res = try self.allocator.alloc(T, shape_size);
             for (self.slice, 0..) |value, i| {
-                const idxs = try idxToShapeIndexes(self.allocator, i, self.shape);
+                const idxs = try util.idxToShapeIndexes(self.allocator, i, self.shape);
                 defer self.allocator.free(idxs);
                 const j = idxs[idxs.len - 2];
                 const k = idxs[idxs.len - 1];
@@ -96,10 +96,10 @@ pub fn Tensor(comptime T: type) type {
         }
 
         pub fn triu(self: *const Self, opts: TriOpts) !Self {
-            const shape_size = shapeSize(self.shape);
+            const shape_size = util.shapeSize(self.shape);
             var res = try self.allocator.alloc(T, shape_size);
             for (self.slice, 0..) |value, i| {
-                const idxs = try idxToShapeIndexes(self.allocator, i, self.shape);
+                const idxs = try util.idxToShapeIndexes(self.allocator, i, self.shape);
                 defer self.allocator.free(idxs);
                 const j = idxs[idxs.len - 2];
                 const k = idxs[idxs.len - 1];
@@ -123,7 +123,7 @@ pub fn Tensor(comptime T: type) type {
             var slice = try util.slice_init(T, self.allocator, side_count * side_count, 0);
 
             for (self.slice, 0..) |value, i| {
-                const idx = shapeIndexesToIdx(&.{ i, i + @as(usize, @intCast(opts.offset)) }, shape);
+                const idx = util.shapeIndexesToIdx(&.{ i, i + @as(usize, @intCast(opts.offset)) }, shape);
                 slice[idx] = value;
             }
             return Self{
@@ -168,19 +168,19 @@ pub fn Tensor(comptime T: type) type {
                     }
                     res *= it;
                 }
-                return Self{ .allocator = self.allocator, .slice = try self.allocator.alloc(T, 1), .names = &.{}, .shape = try self.allocator.dupe(usize, &.{}) };
+                return Self{ .allocator = self.allocator, .slice = try self.allocator.dupe(T, &.{res}), .names = &.{}, .shape = try self.allocator.dupe(usize, &.{}) };
             }
 
             var result_shape = try util.shapeRemoveAxis(self.allocator, self.shape, opts.axes);
-            var result_shape_size = shapeSize(result_shape);
+            var result_shape_size = util.shapeSize(result_shape);
             var slice = try util.slice_init(T, self.allocator, result_shape_size, 1);
 
             for (self.slice, 0..) |s, i| {
-                var original_indices = try idxToShapeIndexes(self.allocator, i, self.shape);
+                var original_indices = try util.idxToShapeIndexes(self.allocator, i, self.shape);
                 defer self.allocator.free(original_indices);
                 var destination_indexes = try util.shapeRemoveAxis(self.allocator, original_indices, opts.axes);
                 defer self.allocator.free(destination_indexes);
-                var destination_idx = shapeIndexesToIdx(destination_indexes, result_shape);
+                var destination_idx = util.shapeIndexesToIdx(destination_indexes, result_shape);
                 slice[destination_idx] *= s;
             }
 
@@ -194,23 +194,23 @@ pub fn Tensor(comptime T: type) type {
 
         pub fn sum(self: *Self, opts: AggregatesOtps) !Self {
             if (opts.axes.len == 0) {
-                var res: T = 1;
+                var res: T = 0;
                 for (self.slice) |it| {
                     res += it;
                 }
-                return Self{ .allocator = self.allocator, .slice = try self.allocator.alloc(T, 1), .names = &.{}, .shape = try self.allocator.dupe(usize, &.{}) };
+                return Self{ .allocator = self.allocator, .slice = try self.allocator.dupe(T, &.{res}), .names = &.{}, .shape = try self.allocator.dupe(usize, &.{}) };
             }
 
             var result_shape = try util.shapeRemoveAxis(self.allocator, self.shape, opts.axes);
-            var result_shape_size = shapeSize(result_shape);
+            var result_shape_size = util.shapeSize(result_shape);
             var slice = try util.slice_init(T, self.allocator, result_shape_size, 0);
 
             for (self.slice, 0..) |s, i| {
-                var original_indices = try idxToShapeIndexes(self.allocator, i, self.shape);
+                var original_indices = try util.idxToShapeIndexes(self.allocator, i, self.shape);
                 defer self.allocator.free(original_indices);
                 var destination_indexes = try util.shapeRemoveAxis(self.allocator, original_indices, opts.axes);
                 defer self.allocator.free(destination_indexes);
-                var destination_idx = shapeIndexesToIdx(destination_indexes, result_shape);
+                var destination_idx = util.shapeIndexesToIdx(destination_indexes, result_shape);
                 slice[destination_idx] += s;
             }
 
@@ -222,6 +222,161 @@ pub fn Tensor(comptime T: type) type {
             return Self{ .allocator = self.allocator, .slice = slice, .names = &.{}, .shape = final_shape };
         }
 
+        pub fn all(self: *Self, opts: AggregatesOtps) !Tensor(u8) {
+            if (opts.axes.len == 0) {
+                var res: u8 = 1;
+                for (self.slice) |it| {
+                    if (it == 0) {
+                        res = 0;
+                        break;
+                    }
+                }
+                return Tensor(u8){ .allocator = self.allocator, .slice = try self.allocator.dupe(u8, &.{res}), .names = &.{}, .shape = try self.allocator.dupe(usize, &.{}) };
+            }
+
+            var result_shape = try util.shapeRemoveAxis(self.allocator, self.shape, opts.axes);
+            var result_shape_size = util.shapeSize(result_shape);
+            var slice = try util.slice_init(u8, self.allocator, result_shape_size, 1);
+
+            for (self.slice, 0..) |s, i| {
+                var original_indices = try util.idxToShapeIndexes(self.allocator, i, self.shape);
+                defer self.allocator.free(original_indices);
+                var destination_indexes = try util.shapeRemoveAxis(self.allocator, original_indices, opts.axes);
+                defer self.allocator.free(destination_indexes);
+                var destination_idx = util.shapeIndexesToIdx(destination_indexes, result_shape);
+                if (s == 0) {
+                    slice[destination_idx] = 0;
+                }
+            }
+
+            var final_shape = if (opts.keep_axes)
+                try util.shapeKeepAxes(self.allocator, self.shape, opts.axes)
+            else
+                result_shape;
+
+            return Tensor(u8){ .allocator = self.allocator, .slice = slice, .names = &.{}, .shape = final_shape };
+        }
+
+        pub fn any(self: *Self, opts: AggregatesOtps) !Tensor(u8) {
+            if (opts.axes.len == 0) {
+                var res: u8 = 0;
+                for (self.slice) |it| {
+                    if (it != 0) {
+                        res = 1;
+                        break;
+                    }
+                }
+                return Tensor(u8){ .allocator = self.allocator, .slice = try self.allocator.dupe(u8, &.{res}), .names = &.{}, .shape = try self.allocator.dupe(usize, &.{}) };
+            }
+
+            var result_shape = try util.shapeRemoveAxis(self.allocator, self.shape, opts.axes);
+            var result_shape_size = util.shapeSize(result_shape);
+            var slice = try util.slice_init(u8, self.allocator, result_shape_size, 0);
+
+            for (self.slice, 0..) |s, i| {
+                var original_indices = try util.idxToShapeIndexes(self.allocator, i, self.shape);
+                defer self.allocator.free(original_indices);
+                var destination_indexes = try util.shapeRemoveAxis(self.allocator, original_indices, opts.axes);
+                defer self.allocator.free(destination_indexes);
+                var destination_idx = util.shapeIndexesToIdx(destination_indexes, result_shape);
+                if (s != 0) {
+                    slice[destination_idx] = 1;
+                }
+            }
+
+            var final_shape = if (opts.keep_axes)
+                try util.shapeKeepAxes(self.allocator, self.shape, opts.axes)
+            else
+                result_shape;
+
+            return Tensor(u8){ .allocator = self.allocator, .slice = slice, .names = &.{}, .shape = final_shape };
+        }
+
+        pub fn reduceMax(self: *Self, opts: AggregatesOtps) !Self {
+            var result_shape = if (opts.axes.len > 0)
+                try util.shapeRemoveAxis(self.allocator, self.shape, opts.axes)
+            else
+                try self.allocator.dupe(usize, &.{});
+            var result_shape_size = util.shapeSize(result_shape);
+            var slice = try util.slice_init(T, self.allocator, result_shape_size, util.min_value(T));
+
+            for (self.slice, 0..) |s, i| {
+                var destination_idx: usize = 0;
+                if (opts.axes.len > 0) {
+                    destination_idx = dest_blk: {
+                        var original_indices = try util.idxToShapeIndexes(self.allocator, i, self.shape);
+                        defer self.allocator.free(original_indices);
+                        var destination_indexes = try util.shapeRemoveAxis(self.allocator, original_indices, opts.axes);
+                        defer self.allocator.free(destination_indexes);
+                        break :dest_blk util.shapeIndexesToIdx(destination_indexes, result_shape);
+                    };
+                }
+                if (s > slice[destination_idx]) {
+                    slice[destination_idx] = s;
+                }
+            }
+            var final_shape = if (opts.keep_axes)
+                try util.shapeKeepAxes(self.allocator, self.shape, opts.axes)
+            else
+                result_shape;
+
+            return Self{ .allocator = self.allocator, .slice = slice, .names = &.{}, .shape = final_shape };
+        }
+
+        pub fn reduceMin(self: *Self, opts: AggregatesOtps) !Self {
+            var result_shape = if (opts.axes.len > 0)
+                try util.shapeRemoveAxis(self.allocator, self.shape, opts.axes)
+            else
+                try self.allocator.dupe(usize, &.{});
+            var result_shape_size = util.shapeSize(result_shape);
+            var slice = try util.slice_init(T, self.allocator, result_shape_size, util.max_value(T));
+
+            for (self.slice, 0..) |s, i| {
+                var destination_idx: usize = 0;
+                if (opts.axes.len > 0) {
+                    destination_idx = dest_blk: {
+                        var original_indices = try util.idxToShapeIndexes(self.allocator, i, self.shape);
+                        defer self.allocator.free(original_indices);
+                        var destination_indexes = try util.shapeRemoveAxis(self.allocator, original_indices, opts.axes);
+                        defer self.allocator.free(destination_indexes);
+                        break :dest_blk util.shapeIndexesToIdx(destination_indexes, result_shape);
+                    };
+                }
+                if (s < slice[destination_idx]) {
+                    slice[destination_idx] = s;
+                }
+            }
+            var final_shape = if (opts.keep_axes)
+                try util.shapeKeepAxes(self.allocator, self.shape, opts.axes)
+            else
+                result_shape;
+
+            return Self{ .allocator = self.allocator, .slice = slice, .names = &.{}, .shape = final_shape };
+        }
+
+        pub fn mean(self: *Self, opts: AggregatesOtps) !Tensor(f64) {
+            var sum_tensor = try self.sum(opts);
+            defer sum_tensor.deinit();
+
+            const length = @as(f64, @floatFromInt(util.remaingShapeSize(self.shape, opts.axes)));
+
+            var slice = try self.allocator.alloc(f64, sum_tensor.slice.len);
+            for (sum_tensor.slice, 0..) |it, i| {
+                const itf64 = switch (@typeInfo(T)) {
+                    .Float => @as(f64, it),
+                    .Int => @as(f64, @floatFromInt(it)),
+                    else => @compileError("not an int or float type"),
+                };
+                slice[i] = itf64 / length;
+            }
+
+            return Tensor(f64){
+                .allocator = self.allocator,
+                .slice = slice,
+                .shape = try self.allocator.dupe(usize, sum_tensor.shape),
+                .names = try self.allocator.dupe(?[]const u8, sum_tensor.names),
+            };
+        }
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.slice);
             self.slice = undefined;
@@ -230,8 +385,8 @@ pub fn Tensor(comptime T: type) type {
         }
 
         pub fn toString(self: Self) ![]u8 {
-            const sliceChildType = childType(self.slice);
-            const shapeString = try shapeToString(self.allocator, self.shape, self.names);
+            const sliceChildType = util.childType(self.slice);
+            const shapeString = try util.shapeToString(self.allocator, self.shape, self.names);
             defer self.allocator.free(shapeString);
             var list = std.ArrayList(u8).init(self.allocator);
 
@@ -248,66 +403,6 @@ pub fn Tensor(comptime T: type) type {
             std.debug.print("{s}\n", .{str});
         }
     };
-}
-
-fn childType(slice: anytype) []const u8 {
-    const type_info = @typeInfo(@TypeOf(slice));
-    switch (type_info) {
-        .Pointer => |info| if (info.size == .Slice) {
-            return @typeName(info.child);
-        },
-        else => return "",
-    }
-}
-
-pub fn shapeSize(shape: Shape) usize {
-    var res: usize = 1;
-    for (shape) |dim_size| {
-        res *= dim_size;
-    }
-    return res;
-}
-
-pub fn idxToShapeIndexes(allocator: Allocator, idx: usize, shape: Shape) !Shape {
-    var slice = try allocator.alloc(usize, shape.len);
-    var shape_size = shapeSize(shape);
-    var tempIdx = idx;
-    for (shape, 0..) |s, i| {
-        const ratio: usize = try std.math.divFloor(usize, tempIdx, shape_size / s);
-        tempIdx -= (ratio * (shape_size / s));
-        shape_size /= s;
-        slice[i] = ratio;
-    }
-    return slice;
-}
-
-pub fn shapeIndexesToIdx(idxs: Shape, shape: Shape) usize {
-    var shape_size = shapeSize(shape);
-    var res: usize = 0;
-    for (shape, idxs) |s, i| {
-        const elem_count = shape_size / s;
-        res += i * elem_count;
-        shape_size = elem_count;
-    }
-    return res;
-}
-
-fn shapeToString(allocator: Allocator, shape: Shape, names: Names) ![]u8 {
-    var result = std.ArrayList(u8).init(allocator);
-    if (names.len == 0) {
-        for (shape) |it| {
-            try result.writer().print("[{}]", .{it});
-        }
-        return result.toOwnedSlice();
-    }
-    for (names, shape) |n, s| {
-        if (n != null) {
-            try result.writer().print("[{s}: {}]", .{ n.?, s });
-        } else {
-            try result.writer().print("[{}]", .{s});
-        }
-    }
-    return result.toOwnedSlice();
 }
 
 test "some tests" {
@@ -379,7 +474,41 @@ pub fn main() !void {
     defer prodq.deinit();
     try prodq.debug_print();
 
-    var sumq = try iotaq.sum(.{ .axes = &.{ 1, 2 } });
+    var sumq = try iotaq.sum(.{ .axes = &.{ 1, 0 } });
     defer sumq.deinit();
     try sumq.debug_print();
+
+    var sumq2 = try iotaq.sum(.{});
+    defer sumq2.deinit();
+    try sumq2.debug_print();
+
+    var iotaf = try Tensor(f64).iota(allocator, &.{ 2, 3, 4 }, .{});
+    defer iotaf.deinit();
+    var sumf = try iotaf.sum(.{ .axes = &.{1} });
+    defer sumf.deinit();
+    try sumf.debug_print();
+
+    var prodf = try iotaf.product(.{ .axes = &.{1} });
+    defer prodf.deinit();
+    try prodf.debug_print();
+
+    var alliota = try iotaq.all(.{ .axes = &.{0} });
+    defer alliota.deinit();
+    try alliota.debug_print();
+
+    var anyiota = try iotaq.any(.{ .axes = &.{0} });
+    defer anyiota.deinit();
+    try anyiota.debug_print();
+
+    var miniota = try iotaf.reduceMin(.{ .axes = &.{ 0, 2 } });
+    defer miniota.deinit();
+    try miniota.debug_print();
+
+    var maxiota = try iotaf.reduceMax(.{ .axes = &.{ 0, 2 } });
+    defer maxiota.deinit();
+    try maxiota.debug_print();
+
+    var meaniota = try iotaf.mean(.{ .axes = &.{0} });
+    defer meaniota.deinit();
+    try meaniota.debug_print();
 }
