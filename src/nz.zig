@@ -4,6 +4,7 @@ const BuiltinType = std.builtin.Type;
 const Allocator = std.mem.Allocator;
 const util = @import("util.zig");
 const commons = @import("commons.zig");
+const Op = @import("op.zig").Op;
 const Shape = commons.Shape;
 const Names = commons.Names;
 
@@ -32,7 +33,7 @@ pub fn Tensor(comptime T: type) type {
                 .allocator = allocator,
                 .slice = try allocator.dupe(T, slice),
                 .shape = try allocator.dupe(usize, options.shape),
-                .names = options.names,
+                .names = try allocator.dupe(?[]const u8, options.names),
             };
         }
 
@@ -44,7 +45,7 @@ pub fn Tensor(comptime T: type) type {
                 const shape_indexes = try util.idxToShapeIndexes(allocator, i, shape);
                 defer allocator.free(shape_indexes);
                 const val = if (opts.axis == null) i else shape_indexes[opts.axis.?];
-                defer slice[i] = switch (@typeInfo(T)) {
+                slice[i] = switch (@typeInfo(T)) {
                     .Int => @as(T, @intCast(val)),
                     .Float => @as(T, @floatFromInt(val)),
                     else => @compileError("float and int types accepted"),
@@ -54,7 +55,7 @@ pub fn Tensor(comptime T: type) type {
                 .allocator = allocator,
                 .slice = slice,
                 .shape = try allocator.dupe(usize, shape),
-                .names = opts.names,
+                .names = try allocator.dupe(?[]const u8, opts.names),
             };
         }
 
@@ -377,11 +378,177 @@ pub fn Tensor(comptime T: type) type {
                 .names = try self.allocator.dupe(?[]const u8, sum_tensor.names),
             };
         }
+
+        pub fn elementWiseOpI(self: *Self, op: Op) !Self {
+            const type_info = @typeInfo(T);
+            if (type_info == .Int) {
+                return self.copy();
+            } else {
+                var slice = try self.allocator.alloc(T, self.slice.len);
+                for (self.slice, 0..) |value, i| {
+                    slice[i] = switch (op) {
+                        .abs => if (value < 0) -value else value,
+                        .round => std.math.round(value),
+                        .ceil => std.math.ceil(value),
+                        else => unreachable,
+                    };
+                }
+
+                return Self{
+                    .allocator = self.allocator,
+                    .slice = slice,
+                    .shape = try self.allocator.dupe(usize, self.shape),
+                    .names = try self.allocator.dupe(?[]const u8, self.names),
+                };
+            }
+        }
+
+        pub fn abs(self: *Self) !Self {
+            const type_info = @typeInfo(T);
+            if (type_info == .Int and type_info.Int.signedness == .unsigned) {
+                return self.copy();
+            } else {
+                return elementWiseOpI(self, .abs);
+            }
+        }
+        pub fn round(self: *Self) !Self {
+            return elementWiseOpI(self, .round);
+        }
+        pub fn ceil(self: *Self) !Self {
+            return elementWiseOpI(self, .ceil);
+        }
+
+        // element wise operations returning float tensors
+        pub fn elementWiseOpF(self: *Self, op: Op) !Tensor(f64) {
+            var slice = try self.allocator.alloc(f64, self.slice.len);
+            for (self.slice, 0..) |value, i| {
+                const float_val = switch (@typeInfo(T)) {
+                    .Int => @as(f64, @intFromFloat(value)),
+                    .Float => value,
+                    else => @compileError("only float and integer types are accepted"),
+                };
+
+                slice[i] = switch (op) {
+                    .cos => std.math.cos(float_val),
+                    .acos => std.math.acos(float_val),
+                    .cosh => std.math.cosh(float_val),
+                    .acosh => std.math.acosh(float_val),
+                    .tan => std.math.tan(float_val),
+                    .atan => std.math.atan(float_val),
+                    .tanh => std.math.tanh(float_val),
+                    .atanh => std.math.atanh(float_val),
+                    .sin => std.math.sin(float_val),
+                    .asin => std.math.asin(float_val),
+                    .sinh => std.math.sinh(float_val),
+                    .asinh => std.math.asinh(float_val),
+                    else => unreachable,
+                };
+            }
+            return Tensor(f64){
+                .allocator = self.allocator,
+                .slice = slice,
+                .shape = try self.allocator.dupe(usize, self.shape),
+                .names = try self.allocator.dupe(?[]const u8, self.names),
+            };
+        }
+
+        pub fn cos(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.cos);
+        }
+
+        pub fn acos(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.acos);
+        }
+
+        pub fn cosh(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.cosh);
+        }
+
+        pub fn acosh(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.acosh);
+        }
+
+        pub fn sin(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.sin);
+        }
+
+        pub fn asin(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.asin);
+        }
+
+        pub fn sinh(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.sinh);
+        }
+
+        pub fn asinh(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.asinh);
+        }
+
+        pub fn tan(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.tan);
+        }
+
+        pub fn atan(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.atan);
+        }
+
+        pub fn tanh(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.tanh);
+        }
+
+        pub fn atanh(self: *Self) !Tensor(f64) {
+            return elementWiseOpF(self, Op.atanh);
+        }
+
+        pub fn elementWiseBinaryOp(self: *Self, other: *Self, op: Op) !Tensor(f64) {
+            _ = other;
+            var slice = try self.allocator.alloc(f64, self.slice.len);
+            for (self.slice, 0..) |value, i| {
+                const float_val = switch (@typeInfo(T)) {
+                    .Int => @as(f64, @intFromFloat(value)),
+                    .Float => value,
+                    else => @compileError("only float and integer types are accepted"),
+                };
+
+                slice[i] = switch (op) {
+                    .cos => std.math.cos(float_val),
+                    .acos => std.math.acos(float_val),
+                    .cosh => std.math.cosh(float_val),
+                    .acosh => std.math.acosh(float_val),
+                    .tan => std.math.tan(float_val),
+                    .atan => std.math.atan(float_val),
+                    .tanh => std.math.tanh(float_val),
+                    .atanh => std.math.atanh(float_val),
+                    .sin => std.math.sin(float_val),
+                    .asin => std.math.asin(float_val),
+                    .sinh => std.math.sinh(float_val),
+                    .asinh => std.math.asinh(float_val),
+                    else => unreachable,
+                };
+            }
+            return Tensor(f64){
+                .allocator = self.allocator,
+                .slice = slice,
+                .shape = try self.allocator.dupe(usize, self.shape),
+                .names = try self.allocator.dupe(?[]const u8, self.names),
+            };
+        }
         pub fn deinit(self: *Self) void {
             self.allocator.free(self.slice);
             self.slice = undefined;
             self.allocator.free(self.shape);
             self.shape = undefined;
+            self.allocator.free(self.names);
+            self.names = undefined;
+        }
+
+        pub fn copy(self: *Self) !Self {
+            return Self{
+                .allocator = self.allocator,
+                .slice = try self.allocator.dupe(T, self.slice),
+                .shape = try self.allocator.dupe(usize, self.shape),
+                .names = try self.allocator.dupe(?[]const u8, self.names),
+            };
         }
 
         pub fn toString(self: Self) ![]u8 {
@@ -409,68 +576,11 @@ test "some tests" {
     const print = std.debug.print;
     _ = print;
     const allocator = testing.allocator;
-    // const TensorF64 = Tensor(f64);
-    // var tensor = try TensorF64.tensor(allocator, &[_]f64{ 1, 2, 3, 4, 5, 5 }, .{ .shape = &.{ 2, 3 }, .names = &[2]?[]const u8{ "x", "y" } });
-    // defer tensor.deinit();
-    // var a_tri = try Tensor(u8).tri(allocator, 4, 5, .{ .k = 2 });
-    // defer a_tri.deinit();
-    // const tri_string = try a_tri.toString();
-    // defer allocator.free(tri_string);
-    // var a_tril = try Tensor(f64).tril(&tensor, .{});
-    // defer a_tril.deinit();
-    // const tril_string = try a_tril.toString();
-    // defer allocator.free(tril_string);
-    // print("{s}", .{tril_string});
-    // var a_triu = try Tensor(f64).triu(&tensor, .{ .k = 0 });
-    // defer a_triu.deinit();
-    // const triu_string = try a_triu.toString();
-    // defer allocator.free(triu_string);
-    // print("{s}\n", .{triu_string});
-    // const indexes = try idxToShapeIndexes(allocator, 52, &.{ 2, 3, 3, 4 });
-    // defer allocator.free(indexes);
-    // // std.debug.print("{any}", .{indexes});
-    // const index = shapeIndexesToIdx(&.{ 1, 1, 1 }, &.{ 2, 3, 3 });
-    // try testing.expectEqual(index, 13);
-    // var one_dim_tensor = try TensorF64.tensor(allocator, &[4]f64{ 1, 2, 3, 4 }, .{ .shape = &.{4} });
-    // defer one_dim_tensor.deinit();
-    // var diag = try TensorF64.makeDiagonal(&one_dim_tensor, .{ .offset = 1 });
-    // defer diag.deinit();
-    // const diag_string = try diag.toString();
-    // defer allocator.free(diag_string);
-    // print("diag: {s}\n", .{diag_string});
-    // var iot = try Tensor(f64).iota(allocator, &.{ 2, 3, 4 }, .{ .axis = 1 });
-    // defer iot.deinit();
-    // const iot_string = try iot.toString();
-    // defer allocator.free(iot_string);
-    // print("iot_string: {s}\n", .{iot_string});
-    // var lint = try Tensor(f64).linspace(allocator, 0, 10, 5, .{ .endpoint = true, .name = "x" });
-    // defer lint.deinit();
-    // const lint_string = try lint.toString();
-    // defer allocator.free(lint_string);
-    // print("linespace: {s}\n", .{lint_string});
-    //
-    // var iotap = try Tensor(u32).iota(allocator, &.{ 2, 2, 3 }, .{ .names = &.{ "x", "y", "z" } });
-    // defer iotap.deinit();
-    // try iotap.debug_print();
-    // var prod = try iotap.product(.{});
-    // defer prod.deinit();
-    // try prod.debug_print();
 
     var iotaq = try Tensor(u32).iota(allocator, &.{ 2, 2, 3 }, .{ .names = &.{ "x", "y", "z" } });
     defer iotaq.deinit();
     try iotaq.debug_print();
     var prodq = try iotaq.product(.{ .axes = &.{0} });
-    defer prodq.deinit();
-    try prodq.debug_print();
-}
-
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    var iotaq = try Tensor(u32).iota(allocator, &.{ 2, 2, 3 }, .{ .names = &.{ "x", "y", "z" } });
-    defer iotaq.deinit();
-    try iotaq.debug_print();
-    var prodq = try iotaq.product(.{ .keep_axes = true, .axes = &.{ 1, 2 } });
     defer prodq.deinit();
     try prodq.debug_print();
 
@@ -484,6 +594,7 @@ pub fn main() !void {
 
     var iotaf = try Tensor(f64).iota(allocator, &.{ 2, 3, 4 }, .{});
     defer iotaf.deinit();
+
     var sumf = try iotaf.sum(.{ .axes = &.{1} });
     defer sumf.deinit();
     try sumf.debug_print();
@@ -508,7 +619,44 @@ pub fn main() !void {
     defer maxiota.deinit();
     try maxiota.debug_print();
 
-    var meaniota = try iotaf.mean(.{ .axes = &.{0} });
+    var meaniota = try iotaf.mean(.{ .axes = &.{ 0, 2 } });
     defer meaniota.deinit();
     try meaniota.debug_print();
+
+    var i32Tensor = try Tensor(i32).tensor(allocator, &.{ -1, 0, 1, -2, -1, 0 }, .{ .shape = &.{ 2, 3 } });
+    defer i32Tensor.deinit();
+
+    var absi32 = try i32Tensor.abs();
+    defer absi32.deinit();
+    try absi32.debug_print();
+
+    var usize_tensor = try Tensor(usize).tensor(allocator, &.{ 1, 2, 3, 4 }, .{ .shape = &.{ 2, 2 } });
+    defer usize_tensor.deinit();
+    var abs_usize = try usize_tensor.abs();
+    defer abs_usize.deinit();
+    try abs_usize.debug_print();
+
+    var acoshiotaf = try iotaf.acosh();
+    defer acoshiotaf.deinit();
+    try acoshiotaf.debug_print();
+
+    var acosiotaf = try iotaf.acos();
+    defer acosiotaf.deinit();
+    try acosiotaf.debug_print();
+
+    var cosiotaf = try iotaf.cos();
+    defer cosiotaf.deinit();
+    try cosiotaf.debug_print();
+
+    var f64_tensor = try Tensor(f64).tensor(allocator, &.{ 0.1, 0.2, 0.5, -0.4 }, .{ .shape = &.{ 2, 2 } });
+    defer f64_tensor.deinit();
+    var absf64 = try f64_tensor.abs();
+    defer absf64.deinit();
+    try absf64.debug_print();
+}
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    _ = allocator;
 }

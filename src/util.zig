@@ -118,6 +118,7 @@ pub fn idxToShapeIndexes(allocator: Allocator, idx: usize, shape: Shape) !Shape 
     }
     return slice;
 }
+
 pub fn childType(slice: anytype) []const u8 {
     const type_info = @typeInfo(@TypeOf(slice));
     switch (type_info) {
